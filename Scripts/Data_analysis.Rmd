@@ -1,0 +1,294 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r, include=FALSE}
+source("package.R")
+Data_combined <- read.csv("../Data/Data_combined.csv")
+rownames(Data_combined) <- Data_combined$X
+Data_combined <- Data_combined[,-1]
+
+example_sample_name <- c("Sample_1", "Sample_2", "Sample_3", "Sample_4", "Sample_5", "Sample_6", "Sample_7", "Sample_8", "Sample_9")
+example_phenotype <- rep(c("heatlhy", "cancer", "treated"), each = 3)
+example_de_tableau_de_phenotype <- data.frame("Sample" = example_sample_name, "Phenotype" = example_phenotype)
+```
+
+
+############ ############ ############ ############ ############ FONCTIONS ############ ############ ############ ############ ############ 
+
+##### Normalise les données
+##### DATA = Données à normaliser
+##### Revoie les données normalisées
+```{r}
+Normalize_data <- function(DATA){
+  res <- voom(DATA) %>% .$E
+  return(res)
+}
+```
+
+
+
+##### Créé une heatmap de corrélation entre les échantillons
+##### DATA = Données à analyser
+##### Phenotype = Tableau de données renseignant le phénotype des échantillons
+##### Affiche la heatmap
+##### Ne renvoie rien
+```{r}
+Make_heatmap <- function(DATA, Phenotype) {
+  ann_color <- list(
+    Phenotype = c(cancer = "red", healthy = "blue"))
+  annotation_for_heatmap <- data.frame(Phenotype = Phenotype$Phenotype)
+  rownames(annotation_for_heatmap) <- colnames(DATA)
+  corr <- rcorr(as.matrix(DATA), type = "pearson")$r
+  colnames(corr) <- colnames(DATA)
+  heatmap <- pheatmap(corr, 
+                      color = colorRampPalette(brewer.pal(n = 9, name = "YlOrRd"))(100),
+                      annotation_col = annotation_for_heatmap,
+                      annotation_colors = ann_color,
+                      legend = TRUE,
+                      treeheight_row = 20,
+                      fontsize = 10
+  )
+  return(heatmap)
+}
+```
+
+
+
+
+##### compare l'expression génique à travers les différents phénotypes
+##### DATA = Données à analyser
+##### Phenotype = Tableau de données renseignant le phénotype des échantillons
+##### Renvoie un tableau d'analyse de gene expression
+```{r}
+Differential_analysis <- function(DATA, Phenotype){
+  design.pairs <- function(levels) {
+    n <- length(levels)
+    design <- matrix(0,n,choose(n,2))
+    rownames(design) <- levels
+    colnames(design) <- 1:choose(n,2)
+    k <- 0
+    for (i in 1:(n - 1))
+      for (j in (i + 1):n) {
+        k <- k + 1
+        design[i,k] <- 1
+        design[j,k] <- -1
+        colnames(design)[k] <- paste(levels[i], "-", levels[j],sep = "")
+      }
+    design
+  }
+  design <- model.matrix(~0 + Phenotype$Phenotype)
+  contr.matrix <- design.pairs(levels(factor(Phenotype$Phenotype)))
+  colnames(design) <- rownames(contr.matrix)   
+  Fit <- lmFit(DATA, design) %>%
+    contrasts.fit(., contr.matrix) %>%
+    eBayes(., trend = TRUE)
+  
+  FitList <- list()
+  for (i in 1:ncol(contr.matrix)) {
+    FitList[[i]] <- topTable(Fit, coef = i, adjust.method = "BH", number = nrow(DATA)) %>%
+      mutate(ID = rownames(.))
+    
+    message(paste0(i, " done"))
+    
+  }
+  names(FitList) <- colnames(contr.matrix)
+  return(FitList[[1]])
+}
+```
+ 
+##############################################################################################################################################################################################################################################################################################################################################
+
+
+
+
+
+############ ############ ############ ############ ############ A COMPLETER ############ ############ ############ ############ ############ 
+
+# A faire 
+##### Normaliser les données
+##### Tableau des phénotypes
+```{r}
+data_norm <- Normalize_data(Data_combined)
+  
+example_de_tableau_de_phenotype
+
+phenotype = c(rep("cancer", each = 21), rep("healthy", each = 2))
+
+Tableau_des_phenotypes <- data.frame("Sample" = colnames(Data_combined), "Phenotype" = phenotype)
+  
+  
+```
+o
+
+# A faire 
+##### Heatmap
+```{r}
+
+Make_heatmap(data_norm, Tableau_des_phenotypes)
+
+```
+
+
+# A faire
+##### Analyse différentielle d'expression
+```{r}
+Analysis <- Differential_analysis(data_norm, Tableau_des_phenotypes)
+  
+  
+```
+
+# A faire
+##### Liste des gènes dont la différence d'expression est la plus significative (p.value < 0.05)
+```{r}
+
+genes <- c()
+liste_genes <- Analysis
+
+for (i in 1:length(liste_genes$logFC)){
+  if (liste_genes[i,4] < 0.05){
+     genes <- c(genes,(liste_genes[i,7]))
+  }
+}
+
+
+
+
+noms_genes <- liste_genes[liste_genes$P.Value < 0.05, ]
+
+
+```
+
+
+# A faire
+##### Lister les gènes sous exprimés dans les échantillons sains
+##### TP53 est-il différemment exprimé dans les échantillons malades ?
+##### CEBPA ?
+```{r}
+
+noms_genes_plus <- noms_genes[noms_genes$logFC > 0,7]
+
+Analysis[Analysis$ID=="TP53",]
+#Non, P Value > 0.05
+
+Analysis[Analysis$ID=="CEBPA",]
+#Oui et P Value < 0.05 : + exprimé dans le cas du cancer
+
+
+
+```
+
+# A faire
+##### Lister les 100 gènes les plus différemment exprimés
+```{r}
+tri <- rev(order(abs(noms_genes$logFC)))
+les_cents <- tri[0:100]
+cent_id <- noms_genes[les_cents,]
+
+```
+
+
+============================================================== Session 24.03 ======================================================================
+
+
+```{r}
+Make_a_volcano_plot <- function(DATA_analysed, List_of_genes, x_axis, y_axis, title){
+  EnhancedVolcano(
+  toptable = DATA_analysed,
+  lab = List_of_genes,
+  x = x_axis,
+  y = y_axis,
+  FCcutoff = 1.5,
+  pCutoff = 0.0001,
+  title = title,
+  subtitle = NA,
+  legendPosition = "right",
+  subtitleLabSize = 0,
+  legendLabSize = 10
+)
+}
+
+Differencial_gene_expression_analysis <- read.csv("../Data/Differencial_gene_expression_analysis.csv")
+
+Make_a_volcano_plot(Differencial_gene_expression_analysis, Differencial_gene_expression_analysis$Gene_names, "Column_B", "Column_D", "A wonderfull volcano plot")
+
+
+```
+
+```{r}
+Make_a_gene_ontology_analysis <- function(Gene_to_analyze){
+  test_enrich <- enrichGO(Gene_to_analyze, OrgDb = "org.Hs.eg.db", ont = "BP", pAdjustMethod = "none", keyType = "SYMBOL")
+  return(test_enrich)
+}
+```
+
+
+
+
+
+
+
+
+# A faire
+##### Faire un volcanoplot de l'analyse d'expression génique
+
+```{r}
+Make_a_volcano_plot(Analysis, rownames(Analysis), "logFC", "P.Value", "Différence d'expression des gênes lors du gliome")
+```
+# Try to explain the figure. You can check the data results to help your analysis.
+
+
+Ce document est un volcano plot décrivant la différence d'expression des gènes dans le cas du gliome. On considère en abscisse le fold change : la différence d'expression du gène en question, et en ordonnée la P.Value, mesurant la significativé des résultats obtenus. 
+On observe qu'il y a des gènes significativement différemment exprimés. Cependant, on voit également qu'il y a plus de gènes significativement sur-exprimés que sous-exprimés. Le Log FC des gènes étudiés est compris entre -15 et 15.
+Nous avons considéré un résultat significatif si sa P.Value est strictement inférieur à 0.0001, soit -log10P strictement supérieur à 4. De la même manière, nous n'avons étudié que les résultats dont la valeur absolue de Log2 fold change est supérieure à 1.5.
+
+
+
+
+```{r}
+```
+
+# Do a gene ontology analysis of up regulated genes
+```{r}
+genes_liste_up <- noms_genes[noms_genes$logFC>1.5,"ID"]
+
+Result_of_Gene_ontology_analysis <- Make_a_gene_ontology_analysis(genes_liste_up)
+
+dotplot(Result_of_Gene_ontology_analysis, showCategory = 30)
+emapplot(Result_of_Gene_ontology_analysis, color = "qvalue", size = "Count")
+
+``` 
+
+# Do a gene ontology analysis of down regulated genes
+```{r}
+genes_liste_down <- noms_genes[noms_genes$logFC<(-1.5),"ID"]
+
+
+Result_of_Gene_ontology_analysis <- Make_a_gene_ontology_analysis(genes_liste_down)
+
+dotplot(Result_of_Gene_ontology_analysis, showCategory = 30)
+emapplot(Result_of_Gene_ontology_analysis, color = "qvalue", size = "Count")
+
+```
+
+# Make a short abstract of your results
+
+
+
+Nous retrouvons dans les gênes sur-exprimés des gènes impliqués dans la migrations des leucocytes, dans la régulation de la production de cytokines et dans l'activation de lymphocytes T ou la régulation de la réponse inflammatoire. On observe donc que ces gènes sur-exprimés impliqués agissent notamment dans le système immunitaire. Les gènes sous-exprimés sont des gènes impliqués dans le développement du système cérébral : développement du cerveau antérieur (forebrain development), développement du télencéphale (telencephalon development). 
+
+```{r}
+
+```
+
+# Are the results relevant?
+
+
+.
+
+Ces résultats semblent cohérents, plusieurs études sont arrivées à la même conlusion
+```{r}
+
+```
+

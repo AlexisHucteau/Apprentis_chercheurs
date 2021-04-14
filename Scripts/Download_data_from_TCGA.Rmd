@@ -1,0 +1,101 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+source("package.R")
+donnees_patient <- read.csv("../Data/Glioma_sample_ID.tsv", sep = "\t")
+```
+
+```{r}
+Download_data <- function(Sample_of_cases) {
+  query2 <- GDCquery(project = "TCGA-GBM", 
+                     legacy = FALSE, 
+                     data.category = "Transcriptome Profiling", 
+                     workflow.type = "HTSeq - Counts", 
+                     barcode = Sample_of_cases)
+  GDCdownload(query2)
+  prepare <- GDCprepare(query = query2,
+                                save = FALSE,
+                                summarizedExperiment = TRUE)
+  return(prepare)
+  # res <- data.frame(prepare@assays@data@listData[["HTSeq - Counts"]])
+  # colnames(res) <- substr(colnames(prepare), 1, 12)
+  # rownames(res) <- prepare@rowRanges@elementMetadata@listData[["ensembl_gene_id"]]
+  # return(res)
+}
+```
+
+```{r}
+Change_gene_annotation <- function(gene_id, from_gene_ID1, to_gene_ID2){
+  genes_annotated <- getBM(attributes = c(from_gene_ID1, to_gene_ID2), filters = from_gene_ID1, values = gene_id, mart = ensembl)
+  return(genes_annotated)
+}
+```
+
+
+```{r}
+data <- Download_data(donnees_patient$Case.ID)
+
+cancer_expr <- data@assays@data$`HTSeq - Counts`
+rownames(cancer_expr) <- data@rowRanges@ranges@NAMES
+
+healthy_expr <- read.csv("../Data/GSE160092_processed_raw_counts.txt", sep = "\t") %>%
+  dplyr::select(., c("Symbol", "Vehicle_rep1", "Vehicle_rep2"))
+rownames(healthy_expr) <- healthy_expr$Symbol
+healthy_expr <- healthy_expr[,-1]
+```
+
+```{r}
+gene_annotation <- Change_gene_annotation(rownames(cancer_expr), "ensembl_gene_id", "hgnc_symbol")
+```
+
+
+```{r}
+gene_annotation
+
+gene_annotation <- gene_annotation %>%
+  dplyr::filter(., hgnc_symbol != "")
+
+length(unique(gene_annotation$hgnc_symbol))
+length(unique(gene_annotation$ensembl_gene_id))
+gene_annotation$ensembl_gene_id[duplicated(gene_annotation$ensembl_gene_id)]
+
+cancer_expr <- cancer_expr %>%
+  data.frame(.) %>%
+  dplyr::filter(., rownames(.) %in% gene_annotation$ensembl_gene_id)
+
+duplicated_genes <- gene_annotation$hgnc_symbol[duplicated(gene_annotation$hgnc_symbol)]
+
+gene_annotation <- gene_annotation %>%
+  dplyr::filter(., !(hgnc_symbol %in% duplicated_genes))
+
+cancer_expr <- cancer_expr %>%
+  dplyr::filter(., rownames(.) %in% gene_annotation$ensembl_gene_id)
+
+gene_annotation <- gene_annotation %>%
+  dplyr::filter(., ensembl_gene_id != "ENSG00000230417")
+
+cancer_expr <- cancer_expr %>%
+  dplyr::filter(., rownames(.) != "ENSG00000230417")
+
+rownames(cancer_expr) <- gene_annotation$hgnc_symbol
+```
+
+```{r}
+Data_combined <- merge(cancer_expr, healthy_expr, by = 0)
+rownames(Data_combined) <- Data_combined$Row.names
+
+Data_combined <- Data_combined[,-1]
+
+write.csv(Data_combined, "../Data/Data_combined.csv")
+```
+
+
+###########################################################################################################################
+###########################################################################################################################
+###########################################################################################################################
+###########################################################################################################################
+###########################################################################################################################
+
